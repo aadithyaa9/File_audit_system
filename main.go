@@ -61,9 +61,34 @@ func analyseLogs() {
 }
 
 func extractIP(line string) string {
+	fp := -1 //
+	sp := -1 // to find and distinguish between first pipe and second pipe
+
+	for i, char := range line {
+		if char == '|' {
+			if fp == -1 {
+				fp = i
+			} else {
+				sp = i
+				break
+			}
+
+		}
+	}
+
+	if fp != -1 && sp != -1 {
+		return line[fp+2 : sp-1]
+	}
+
 	return ""
+
 }
 
 func contains(s string, substr string) bool {
+	for i := 0; i < len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
 	return false
 }
