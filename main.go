@@ -5,8 +5,35 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sync"
 	"time"
 )
+
+const (
+	Latency = 1 * time.Millisecond
+)
+
+type SafeCounter struct {
+	mu     sync.Mutex
+	counts map[string]int
+}
+
+func (c *SafeCounter) Inc(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.counts[key]++
+}
+
+func (c *SafeCounter) value() map[string]int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	clone := make(map[string]int)
+	for k, v := range c.counts {
+		clone[k] = v
+	}
+
+	return clone
+}
 
 func simulateLogs() {
 	file, _ := os.Create("server.log")
@@ -29,35 +56,70 @@ func simulateLogs() {
 	fmt.Println("Done! 'server.log' created.")
 }
 
-func analyseLogs() {
-	file, err := os.Open("server.log")
-	if err != nil {
-		fmt.Println("Error opening the file", err)
-		return
+func procesLine(line string) string {
+	time.Sleep(Latency)
+	if contains(line, "500 Internal Error") {
+		return extractIP(line)
 	}
+	return ""
+}
 
+func runSequential() time.Duration {
+	file, _ := os.Open("server.log")
 	defer file.Close()
-	errorMap := make(map[string]int)
+
 	scanner := bufio.NewScanner(file)
+	counts := make(map[string]int)
+
 	start := time.Now()
 
+	fmt.Println("This is Sequential")
 	for scanner.Scan() {
 		line := scanner.Text()
-		if contains(line, "500 Internal Error") {
-			ip := extractIP(line)
-			errorMap[ip] = errorMap[ip] + 1
+		ip := procesLine(line)
+		if ip != "" {
+			counts[ip]++
 		}
+
+	}
+	return time.Since(start)
+
+}
+
+func runConcurrent() time.Duration {
+	file, _ := os.Open("server.log")
+	defer file.Close()
+
+	counter := &SafeCounter{counts: make(map[string]int)}
+	jobs := make(chan string, 50)
+
+	var wg sync.WaitGroup
+
+	workers := 10
+	fmt.Println("This is Concurrent")
+	start := time.Now()
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for line := range jobs {
+				ip := procesLine(line)
+				if ip != "" {
+					counter.Inc(ip)
+
+				}
+			}
+		}(i)
 	}
 
-	duration := time.Since(start)
-
-	// MY own report made right now
-	fmt.Println("Analysis took", duration)
-	fmt.Println("These are the attackers we found :")
-
-	for ip, count := range errorMap {
-		fmt.Printf("IP: %s has crashed %d times \n", ip, count)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		jobs <- scanner.Text()
 	}
+	close(jobs)
+	wg.Wait()
+
+	return time.Since(start)
 }
 
 func extractIP(line string) string {
@@ -95,5 +157,10 @@ func contains(s string, substr string) bool {
 
 func main() {
 	simulateLogs()
-	analyseLogs()
+	seqTime := runSequential()
+	fmt.Printf("Sequential workflow   Done in %v\n\n", seqTime)
+
+	concTime := runConcurrent()
+	fmt.Printf("Concurrent workflow   Done in %v\n\n", concTime)
+
 }
