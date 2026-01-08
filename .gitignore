@@ -1,0 +1,12 @@
+# IDE
+.idea/
+*.exe
+*.out
+*.bin
+/file_audit_system
+
+/bin/
+dist/
+
+*.log
+
